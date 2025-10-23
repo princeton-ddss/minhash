@@ -30,8 +30,8 @@ impl VScalar for Repeat {
             .iter()
             .map(|ptr| DuckString::new(&mut { *ptr }).as_str().to_string());
         let counts = counts.as_slice_with_len::<i32>(input.len());
-        for (count, value) in counts.iter().zip(strings).take(input.len()) {
-            output.insert(0, value.repeat((*count) as usize).as_str());
+        for (i, (count, value)) in counts.iter().zip(strings).enumerate().take(input.len()) {
+            output.insert(i, value.repeat((*count) as usize).as_str());
         }
 
         Ok(())
