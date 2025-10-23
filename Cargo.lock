@@ -445,11 +445,11 @@ checksum = "2a093eed1c714143b257b95fa323e38527fabf05fbf02bb0d5d2045275ffdaef"
 dependencies = [
  "arrow",
  "cast",
- "duckdb-loadable-macros",
  "fallible-iterator",
  "fallible-streaming-iterator",
  "hashlink",
  "libduckdb-sys",
+ "num",
  "num-integer",
  "rust_decimal",
  "strum 0.27.2",
