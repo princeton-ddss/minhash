@@ -50,7 +50,7 @@ To run the extension code, start `duckdb` with `-unsigned` flag. This will allow
 duckdb -unsigned
 ```
 
-After loading the extension by the file path, you can use the functions provided by the extension (in this case, `minhash()`).
+After loading the extension by the file path, you can use the functions provided by the extension (in this case, `minhash(string, ngram_width, band_count, band_size, seed)`).
 
 ```sql
 LOAD './build/debug/extension/minhash/minhash.duckdb_extension';
