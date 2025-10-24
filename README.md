@@ -1,13 +1,7 @@
-# DuckDB Rust extension template
-This is an **experimental** template for Rust based extensions based on the C Extension API of DuckDB. The goal is to
-turn this eventually into a stable basis for pure-Rust DuckDB extensions that can be submitted to the Community extensions
-repository
+# MinHash DuckDB Extension
 
-Features:
-- No DuckDB build required
-- No C++ or C code required
-- CI/CD chain preconfigured
-- (Coming soon) Works with community extensions
+DuckDB extension for [MinHash](https://en.wikipedia.org/wiki/MinHash),
+using the Rust implementation from [`zoomerjoin`](https://github.com/beniaminogreen/zoomerjoin).
 
 ## Cloning
 
@@ -56,55 +50,48 @@ To run the extension code, start `duckdb` with `-unsigned` flag. This will allow
 duckdb -unsigned
 ```
 
-After loading the extension by the file path, you can use the functions provided by the extension (in this case, `rusty_quack()`).
+After loading the extension by the file path, you can use the functions provided by the extension (in this case, `minhash()`).
 
 ```sql
-LOAD './build/debug/extension/rusty_quack/rusty_quack.duckdb_extension';
-SELECT * FROM rusty_quack('Jane');
+LOAD './build/debug/extension/minhash/minhash.duckdb_extension';
+
+CREATE TEMPORARY TABLE temp_names (
+    name VARCHAR
+);
+
+INSERT INTO temp_names (name) VALUES
+    ('Alice Johnson'),
+    ('Robert Smith'),
+    ('Charlotte Brown'),
+    ('David Martinez'),
+    ('Emily Davis'),
+    ('Michael Wilson'),
+    ('Sophia Taylor'),
+    ('James Anderson'),
+    ('Olivia Thomas'),
+    ('Benjamin Lee');
+
+SELECT minhash(name, 2, 3, 2, 123) AS hash FROM temp_names;
 ```
 
 ```
-┌─────────────────────┐
-│       column0       │
-│       varchar       │
-├─────────────────────┤
-│ Rusty Quack Jane 🐥 │
-└─────────────────────┘
-```
-
-## Testing
-This extension uses the DuckDB Python client for testing. This should be automatically installed in the `make configure` step.
-The tests themselves are written in the SQLLogicTest format, just like most of DuckDB's tests. A sample test can be found in
-`test/sql/<extension_name>.test`. To run the tests using the *debug* build:
-
-```shell
-make test_debug
-```
-
-or for the *release* build:
-```shell
-make test_release
-```
-
-### Version switching
-Testing with different DuckDB versions is really simple:
-
-First, run
-```
-make clean_all
-```
-to ensure the previous `make configure` step is deleted.
-
-Then, run
-```
-DUCKDB_TEST_VERSION=v1.3.2 make configure
-```
-to select a different duckdb version to test with
-
-Finally, build and test with
-```
-make debug
-make test_debug
+┌──────────────────────────────────────────────────────────────────┐
+│                               hash                               │
+│                             uint64[]                             │
+├──────────────────────────────────────────────────────────────────┤
+│ [13571929851950895096, 9380027513982184887, 2973452616913389687] │
+│ [8779492002049334510, 6213046290947405081, 13321761559668221936] │
+│ [17147317566672094549, 9868884775472345505, 9544039307031965287] │
+│ [8205471107123956470, 3856457550471365223, 160978381860159594]   │
+│ [5031590273592478399, 2643794611755346220, 10496886524478706543] │
+│ [7351019434982270461, 11969544284460938578, 1096653296545732983] │
+│ [947309311728102588, 6485027977500841069, 11465726828575944543]  │
+│ [6511242524203601686, 5368660891928216176, 4531328875985401258]  │
+│ [6134578107120707744, 8471287122008225606, 13561556383590060017] │
+│ [7926739398273580158, 2501438919389423193, 17085734390799214704] │
+├──────────────────────────────────────────────────────────────────┤
+│                             10 rows                              │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ### Known issues
