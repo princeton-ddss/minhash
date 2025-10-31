@@ -23,7 +23,7 @@ use crate::shingleset::ShingleSet;
 fn validate_constant_param<T: Copy + PartialEq>(
     slice: &[T],
     param_name: &str,
-) -> Result<T, Box<dyn std::error::Error>> {
+) -> Result<T, Box<dyn Error>> {
     let value = slice[0];
     if !slice.iter().all(|&v| v == value) {
         return Err(format!("{} must be a constant value, not vary per row", param_name).into());
@@ -31,50 +31,59 @@ fn validate_constant_param<T: Copy + PartialEq>(
     Ok(value)
 }
 
-struct MinHash {}
+unsafe fn minhash_invoke(
+    input: &mut DataChunkHandle,
+    output: &mut dyn WritableVector,
+    truncate: bool,
+) -> Result<(), Box<dyn Error>> {
+    let input_strings = input.flat_vector(0);
+    let input_ngram_width = input.flat_vector(1);
+    let input_band_count = input.flat_vector(2);
+    let input_band_size = input.flat_vector(3);
+    let input_seed = input.flat_vector(4);
 
-impl VScalar for MinHash {
-    type State = ();
+    let strings = input_strings
+        .as_slice_with_len::<duckdb_string_t>(input.len())
+        .iter()
+        .map(|ptr| DuckString::new(&mut { *ptr }).as_str().to_string());
 
-    unsafe fn invoke(
-        _: &Self::State,
-        input: &mut DataChunkHandle,
-        output: &mut dyn WritableVector,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let input_strings = input.flat_vector(0);
-        let input_ngram_width = input.flat_vector(1);
-        let input_band_count = input.flat_vector(2);
-        let input_band_size = input.flat_vector(3);
-        let input_seed = input.flat_vector(4);
+    let ngram_width = validate_constant_param(
+        input_ngram_width.as_slice_with_len::<usize>(input.len()),
+        "ngram_width",
+    )?;
 
-        let strings = input_strings
-            .as_slice_with_len::<duckdb_string_t>(input.len())
-            .iter()
-            .map(|ptr| DuckString::new(&mut { *ptr }).as_str().to_string());
+    let band_count = validate_constant_param(
+        input_band_count.as_slice_with_len::<usize>(input.len()),
+        "band_count",
+    )?;
 
-        let ngram_width = validate_constant_param(
-            input_ngram_width.as_slice_with_len::<usize>(input.len()),
-            "ngram_width",
-        )?;
+    let band_size = validate_constant_param(
+        input_band_size.as_slice_with_len::<usize>(input.len()),
+        "band_size",
+    )?;
 
-        let band_count = validate_constant_param(
-            input_band_count.as_slice_with_len::<usize>(input.len()),
-            "band_count",
-        )?;
+    let seed = validate_constant_param(input_seed.as_slice_with_len::<u64>(input.len()), "seed")?;
 
-        let band_size = validate_constant_param(
-            input_band_size.as_slice_with_len::<usize>(input.len()),
-            "band_size",
-        )?;
+    let mut output_hashes = output.list_vector();
+    let total_len: usize = band_count * input.len();
+    let mut hashes_vec = output_hashes.child(total_len);
 
-        let seed =
-            validate_constant_param(input_seed.as_slice_with_len::<u64>(input.len()), "seed")?;
-
-        let mut output_hashes = output.list_vector();
-        let total_len: usize = band_count * input.len();
-        let mut hashes_vec = output_hashes.child(total_len);
+    if truncate {
+        let hashes: &mut [u32] = hashes_vec.as_mut_slice_with_len(total_len);
+        let mut offset = 0;
+        for (row_idx, string) in strings.enumerate().take(input.len()) {
+            let shingle_set = ShingleSet::new(&string, ngram_width, row_idx, None);
+            let mut rng = StdRng::seed_from_u64(seed);
+            for band_idx in 0..band_count {
+                let hasher = MinHasher::new(band_size, &mut rng);
+                hashes[offset + band_idx] = hasher.hash(&shingle_set) as u32;
+            }
+            output_hashes.set_entry(row_idx, offset, band_count);
+            offset += band_count;
+        }
+        output_hashes.set_len(input.len());
+    } else {
         let hashes: &mut [u64] = hashes_vec.as_mut_slice_with_len(total_len);
-
         let mut offset = 0;
         for (row_idx, string) in strings.enumerate().take(input.len()) {
             let shingle_set = ShingleSet::new(&string, ngram_width, row_idx, None);
@@ -87,8 +96,22 @@ impl VScalar for MinHash {
             offset += band_count;
         }
         output_hashes.set_len(input.len());
+    }
 
-        Ok(())
+    Ok(())
+}
+
+struct MinHash {}
+
+impl VScalar for MinHash {
+    type State = ();
+
+    unsafe fn invoke(
+        _: &Self::State,
+        input: &mut DataChunkHandle,
+        output: &mut dyn WritableVector,
+    ) -> Result<(), Box<dyn Error>> {
+        minhash_invoke(input, output, /*truncate=*/ false)
     }
 
     fn signatures() -> Vec<ScalarFunctionSignature> {
@@ -105,9 +128,38 @@ impl VScalar for MinHash {
     }
 }
 
+struct MinHash32 {}
+
+impl VScalar for MinHash32 {
+    type State = ();
+
+    unsafe fn invoke(
+        _: &Self::State,
+        input: &mut DataChunkHandle,
+        output: &mut dyn WritableVector,
+    ) -> Result<(), Box<dyn Error>> {
+        minhash_invoke(input, output, /*truncate=*/ true)
+    }
+
+    fn signatures() -> Vec<ScalarFunctionSignature> {
+        vec![ScalarFunctionSignature::exact(
+            vec![
+                LogicalTypeId::Varchar.into(),
+                LogicalTypeId::UBigint.into(),
+                LogicalTypeId::UBigint.into(),
+                LogicalTypeId::UBigint.into(),
+                LogicalTypeId::UBigint.into(),
+            ],
+            LogicalTypeHandle::list(&LogicalTypeId::UInteger.into()),
+        )]
+    }
+}
+
 #[duckdb_entrypoint_c_api()]
 pub unsafe fn extension_entrypoint(con: Connection) -> Result<(), Box<dyn Error>> {
     con.register_scalar_function::<MinHash>("minhash")
         .expect("Failed to register minhash function");
+    con.register_scalar_function::<MinHash32>("minhash32")
+        .expect("Failed to register minhash32 function");
     Ok(())
 }
